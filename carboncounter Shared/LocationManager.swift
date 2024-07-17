@@ -1,66 +1,83 @@
-import Foundation
 import CoreLocation
 
 class LocationManager: NSObject, CLLocationManagerDelegate {
-    private var locationManager: CLLocationManager
-    private var onSpeedUpdate: ((Double) -> Void)?
+    var locationManager: CLLocationManager
+    var delegate: CLLocationManagerDelegate?
+    var lastLocation: CLLocation?
+    var totalDistance: CLLocationDistance = 0.0
+    var totalDuration: TimeInterval = 0.0
+    var isDriving = false
+    var startDrivingDate: Date?
     
     override init() {
         locationManager = CLLocationManager()
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = 10 // Update every 10 meters
         locationManager.requestWhenInUseAuthorization()
+        locationManager.startUpdatingLocation()
     }
-    
+
     func requestLocationPermission() {
         locationManager.requestWhenInUseAuthorization()
     }
-    
-    func startUpdatingLocation(onSpeedUpdate: @escaping (Double) -> Void) {
-        self.onSpeedUpdate = onSpeedUpdate
-        locationManager.startUpdatingLocation()
-    }
-    
-    func stopUpdatingLocation() {
-        locationManager.stopUpdatingLocation()
-    }
-    
+
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         switch status {
-        case .notDetermined:
-            print("Location permission not determined.")
-        case .restricted, .denied:
-            print("Location permission restricted or denied.")
         case .authorizedWhenInUse, .authorizedAlways:
-            print("Location permission granted.")
             locationManager.startUpdatingLocation()
-        @unknown default:
-            print("Unknown location authorization status.")
+        default:
+            break
         }
     }
-    
+
+    func startTrackingDriving() {
+        isDriving = true
+        startDrivingDate = Date()
+        lastLocation = nil
+        totalDistance = 0.0
+        totalDuration = 0.0
+    }
+
+    func stopTrackingDriving() {
+        isDriving = false
+        startDrivingDate = nil
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        if let location = locations.last {
-            print("Current location: \(location.coordinate.latitude), \(location.coordinate.longitude)")
-            
-            // Calculate speed in meters per second
-            let speedInMetersPerSecond = location.speed
-            
-            // Convert speed to miles per hour
-            let speedInMilesPerHour = speedInMetersPerSecond * 2.23694
-            
-            // Check for a valid speed value
-            if speedInMetersPerSecond >= 0 {
-                print("Current speed: \(speedInMilesPerHour) mph")
-                onSpeedUpdate?(speedInMilesPerHour)
-            } else {
-                print("Speed data is not available")
+        guard isDriving else { return }
+        guard let newLocation = locations.last else { return }
+        
+        if let lastLocation = lastLocation {
+            let distance = newLocation.distance(from: lastLocation)
+            totalDistance += distance
+            if let startDrivingDate = startDrivingDate {
+                let duration = Date().timeIntervalSince(startDrivingDate)
+                totalDuration += duration
             }
         }
+        
+        lastLocation = newLocation
+        delegate?.locationManager?(manager, didUpdateLocations: locations)
     }
-    
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Failed to get location: \(error.localizedDescription)")
+
+    func calculateEmissions(distance: Double, duration: TimeInterval, carYear: String, carMake: String, carModel: String, carData: [[String]]) -> Double {
+        // Find car emissions data
+        var emissionsPerMile = 0.0
+        for car in carData {
+            if car[0] == carYear && car[1] == carMake && car[2] == carModel, let emissions = Double(car[3]) {
+                emissionsPerMile = emissions
+                break
+            }
+        }
+        
+        // Convert distance to miles and calculate total emissions
+        let distanceInMiles = distance / 1609.34
+        let totalEmissions = emissionsPerMile * distanceInMiles
+        
+        return totalEmissions
     }
+
+    // Other methods and properties...
 }

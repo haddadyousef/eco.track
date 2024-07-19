@@ -4,10 +4,10 @@ import UIKit
 import CoreLocation
 import UserNotifications
 
-class GameScene: SKScene, UITextFieldDelegate {
-
-    fileprivate var label : SKLabelNode?
-    fileprivate var spinnyNode : SKShapeNode?
+class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
+    
+    fileprivate var label: SKLabelNode?
+    fileprivate var spinnyNode: SKShapeNode?
     var welcome = SKLabelNode()
     var startScreen = true
     var getStarted = SKLabelNode()
@@ -32,20 +32,25 @@ class GameScene: SKScene, UITextFieldDelegate {
     // Location Manager
     var locationManager: CLLocationManager!
     var customLocationManager: LocationManager!
-
+    
     // Data for pickers
     var years = [String]()
     var makes = [String]()
     var models = [String]()
     var carData: [[String]] = []
-
+    
+    // Leaderboard variables
+    var leaderboardLabel: SKLabelNode!
+    var userEmissions: Int = 0
+    var otherUserEmissions = [Int]()
+    
     func loadCSVFile() {
         let csvFilePath = "/Users/neven/Downloads/caremissions.csv"
-
+        
         do {
             let csvContent = try String(contentsOfFile: csvFilePath, encoding: .utf8)
             let rows = csvContent.components(separatedBy: "\n")
-
+            
             for (index, row) in rows.enumerated() {
                 if index == 0 { continue } // Skip header row
                 let columns = row.components(separatedBy: ",")
@@ -53,37 +58,43 @@ class GameScene: SKScene, UITextFieldDelegate {
                     carData.append(columns)
                 }
             }
-
+            
             years = Array(Set(carData.map { $0[0] })).sorted()
-
+            
         } catch {
             print("Failed to read the CSV file: \(error)")
         }
     }
-
+    
     override func didMove(to view: SKView) {
-        // Existing setup code...
-
+        super.didMove(to: view)
+        
+        // Setup welcome and get started labels
         welcome.text = "Welcome to your personal carbon accountant"
         welcome.fontSize = 20
         welcome.position = CGPoint(x: 0, y: 280)
         welcome.fontColor = SKColor.black
+        addChild(welcome)
+        
         getStarted.text = "Get Started"
         getStarted.fontSize = 20
         getStarted.position = CGPoint(x: 0, y: 200)
         getStarted.fontColor = SKColor.black
+        addChild(getStarted)
+        
         carLabel = self.childNode(withName: "carquestion") as! SKLabelNode
         carLabel.isHidden = true
-        startScreen = true
-        addChild(getStarted)
-        addChild(welcome)
-        super.didMove(to: view)
+        
         loadCSVFile()
-
+        
         // Initialize LocationManager
         customLocationManager = LocationManager()
+        customLocationManager.delegate = self
+        
+        // Request notification permission and schedule daily notifications
         requestNotificationPermission()
         scheduleDailyNotification()
+        
         // Check for saved car information
         if let savedCarYear = UserDefaults.standard.string(forKey: "carYear"),
            let savedCarMake = UserDefaults.standard.string(forKey: "carMake"),
@@ -96,12 +107,30 @@ class GameScene: SKScene, UITextFieldDelegate {
             // No saved information, show the get started screen
             showGetStartedScreen()
         }
+        
+        // Setup leaderboard label
+        leaderboardLabel = SKLabelNode()
+        leaderboardLabel.fontSize = 20
+        leaderboardLabel.fontColor = SKColor.black
+        leaderboardLabel.position = CGPoint(x: 0, y: 100)
+        leaderboardLabel.isHidden = true
+        addChild(leaderboardLabel)
     }
     
     func showGetStartedScreen() {
         // Show the welcome and get started labels
         welcome.isHidden = false
         getStarted.isHidden = false
+    }
+    
+    func endDrivingSession() {
+        if customLocationManager.isDriving {
+            let emissions = customLocationManager.calculateEmissions(distance: customLocationManager.totalDistance, duration: customLocationManager.totalDuration, carYear: carYear, carMake: carMake, carModel: carModel, carData: carData)
+            print("Total emissions: \(emissions) grams")
+            
+            // Update UI or store emissions as needed
+            userEmissions = Int(emissions)
+        }
     }
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -113,7 +142,6 @@ class GameScene: SKScene, UITextFieldDelegate {
                 welcome.isHidden = true
                 getStarted.isHidden = true
                 carLabel.isHidden = false
-                // Present alert for location permission
             }
         }
     }
@@ -126,53 +154,38 @@ class GameScene: SKScene, UITextFieldDelegate {
             }
         }
     }
-
+    
     func scheduleDailyNotification() {
         let center = UNUserNotificationCenter.current()
-
+        center.removeAllPendingNotificationRequests()  // Remove previous notifications if any
+        
         // Create content for the notification
         let content = UNMutableNotificationContent()
         content.title = "Daily Carbon Emission Report"
         content.body = generateDailyReport()
         content.sound = .default
-
-            // Create a trigger to fire the notification daily at a specific time
+        
+        // Create a trigger to fire the notification daily at a specific time
         var dateComponents = DateComponents()
-        dateComponents.hour = 22  // 8 PM
+        dateComponents.hour = 22  // 10 PM
         let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-            // Create the request
+        
+        // Create the request
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-
-            // Schedule the request with the system
+        
+        // Schedule the request with the system
         center.add(request) { error in
             if let error = error {
                 print("Failed to schedule notification: \(error.localizedDescription)")
             }
         }
     }
-
+    
     func generateDailyReport() -> String {
-        // Fetch daily and average carbon emissions (placeholder implementation)
-        let dailyEmissions = getDailyCarbonEmissions()
-        let averageEmissions = getAverageDailyCarbonEmissions()
-
-        // Compare daily emissions with average emissions
-        let comparison = dailyEmissions > averageEmissions ? "higher" : "lower"
-        let difference = abs(dailyEmissions - averageEmissions)
-
-        return "Your carbon emission for today is \(dailyEmissions) g/mile, which is \(difference) g/mile \(comparison) than your average daily emission of \(averageEmissions) g/mile."
-    }
-
-    func getDailyCarbonEmissions() -> Double {
-        // Implement logic to calculate today's carbon emissions
-        // Placeholder value
-        return 120.0
-    }
-
-    func getAverageDailyCarbonEmissions() -> Double {
-        // Implement logic to calculate the average daily carbon emissions
-        // Placeholder value
-        return 100.0
+        let totalEmissions = customLocationManager.calculateEmissions(distance: customLocationManager.totalDistance, duration: customLocationManager.totalDuration, carYear: carYear, carMake: carMake, carModel: carModel, carData: carData)
+        let distanceInMiles = customLocationManager.totalDistance / 1609.34
+        
+        return "Today, you drove \(distanceInMiles) miles and your carbon emissions were \(totalEmissions) grams."
     }
     
     func presentLocationPermissionAlert() {
@@ -199,7 +212,7 @@ class GameScene: SKScene, UITextFieldDelegate {
         customLocationManager.requestLocationPermission()
         showCarInputFields()  // Show input fields after requesting location permission
     }
-
+    
     func showCarInputFields() {
         // Create and configure UIPickerViews
         yearPickerView = createPickerView()
@@ -251,122 +264,122 @@ class GameScene: SKScene, UITextFieldDelegate {
         return pickerView
     }
     
-    func pickerView(_ pickerView: UIPickerView, attributedTitleForRow row: Int, forComponent component: Int) -> NSAttributedString? {
-        let text: String
-        if pickerView == yearPickerView {
-            text = years[row]
-        } else if pickerView == makePickerView {
-            text = makes[row]
-        } else {
-            text = models[row]
-        }
-        return NSAttributedString(string: text, attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 10)])
-    }
-    
     @objc func confirmButtonTapped() {
-        // Retrieve selected values from picker views
-        carYear = years[yearPickerView.selectedRow(inComponent: 0)]
-        carMake = makes[makePickerView.selectedRow(inComponent: 0)]
-        carModel = models[modelPickerView.selectedRow(inComponent: 0)]
-        
-        // Save car information
+        // Save the selected car information
         UserDefaults.standard.set(carYear, forKey: "carYear")
         UserDefaults.standard.set(carMake, forKey: "carMake")
         UserDefaults.standard.set(carModel, forKey: "carModel")
         
-        // Concatenate car details into a single string
-        let carName = "\(carYear) \(carMake) \(carModel)"
+        // Hide the car input fields and button
+        yearPickerView.isHidden = true
+        makePickerView.isHidden = true
+        modelPickerView.isHidden = true
+        confirmButton.isHidden = true
         
-        // Print the input values (you can handle them as needed)
-        print("Year: \(carYear), Make: \(carMake), Model: \(carModel), Car Name: \(carName)")
+        // Generate random emissions for 3 other users
+        let userEmissions = 0  // User's emissions are initially set to 0
+        let randomEmissions1 = Int.random(in: 0...500)
+        let randomEmissions2 = Int.random(in: 0...500)
+        let randomEmissions3 = Int.random(in: 0...500)
         
-        // Remove pickers and button from view
-        yearPickerView.removeFromSuperview()
-        makePickerView.removeFromSuperview()
-        modelPickerView.removeFromSuperview()
-        confirmButton.removeFromSuperview()
+        // Store other users' emissions for display
+        let otherUserEmissions = [randomEmissions1, randomEmissions2, randomEmissions3]
         
-        // Start updating location to track speed
-        //customLocationManager.startUpdatingLocation(onSpeedUpdate: { speed in
-            //print("Current speed: \(speed) mph")
-        //})
+        // Display the leaderboard
+        displayLeaderboard(userEmissions: userEmissions, otherUserEmissions: otherUserEmissions)
     }
 
-    func updateMakesAndModels() {
-        if let selectedYearIndex = yearPickerView?.selectedRow(inComponent: 0) {
-            let selectedYear = years[selectedYearIndex]
-            let filteredMakes = carData.filter { $0[0] == selectedYear }.map { $0[1] }
-            makes = Array(Set(filteredMakes)).sorted()
-
-            if let selectedMakeIndex = makePickerView?.selectedRow(inComponent: 0), selectedMakeIndex < makes.count {
-                let selectedMake = makes[selectedMakeIndex]
-                let filteredModels = carData.filter { $0[0] == selectedYear && $0[1] == selectedMake }.map { $0[2] }
-                models = Array(Set(filteredModels)).sorted()
-            } else {
-                models = []
-            }
-
-            makePickerView?.reloadAllComponents()
-            modelPickerView?.reloadAllComponents()
+    func displayLeaderboard(userEmissions: Int, otherUserEmissions: [Int]) {
+        let leaderboardView = LeaderboardView(userEmissions: userEmissions, otherUserEmissions: otherUserEmissions)
+        
+        let hostingController = UIHostingController(rootView: leaderboardView)
+        hostingController.view.frame = CGRect(x: 50, y: 100, width: 300, height: 200) // Adjust frame as needed
+        
+        if let view = self.view {
+            view.addSubview(hostingController.view)
+        }
+        
+        // Optionally animate the presentation
+        hostingController.view.alpha = 0
+        UIView.animate(withDuration: 0.3) {
+            hostingController.view.alpha = 1
         }
     }
-
+    
+    // Implement UITextFieldDelegate methods
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        // Handle the event when text field editing begins
+    }
+    
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        // Handle the event when text field editing ends
+    }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        // Handle the event when return key is pressed
+        textField.resignFirstResponder()
+        return true
+    }
 }
 
+// Conform to UIPickerViewDataSource and UIPickerViewDelegate
 extension GameScene: UIPickerViewDataSource, UIPickerViewDelegate {
     func numberOfComponents(in pickerView: UIPickerView) -> Int {
         return 1
     }
     
     func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int {
-        if pickerView == yearPickerView {
+        switch pickerView {
+        case yearPickerView:
             return years.count
-        } else if pickerView == makePickerView {
+        case makePickerView:
             return makes.count
-        } else if pickerView == modelPickerView {
+        case modelPickerView:
             return models.count
+        default:
+            return 0
         }
-        return 0
     }
     
     func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
-        if pickerView == yearPickerView {
+        switch pickerView {
+        case yearPickerView:
             return years[row]
-        } else if pickerView == makePickerView {
+        case makePickerView:
             return makes[row]
-        } else if pickerView == modelPickerView {
+        case modelPickerView:
             return models[row]
+        default:
+            return nil
         }
-        return nil
     }
-
+    
     func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
-        if pickerView == yearPickerView {
-            updateMakesAndModels()
-        } else if pickerView == makePickerView {
-            if let selectedYearIndex = yearPickerView?.selectedRow(inComponent: 0) {
-                let selectedYear = years[selectedYearIndex]
-                let selectedMake = makes[row]
-                let filteredModels = carData.filter { $0[0] == selectedYear && $0[1] == selectedMake }.map { $0[2] }
-                models = Array(Set(filteredModels)).sorted()
+        switch pickerView {
+        case yearPickerView:
+            carYear = years[row]
+            makes = Array(Set(carData.filter { $0[0] == carYear }.map { $0[1] })).sorted()
+            print("Selected Year: \(carYear), Available Makes: \(makes)")
+            makePickerView.reloadAllComponents()
+        case makePickerView:
+            if row < makes.count {
+                carMake = makes[row]
+                print("Selected Make: \(carMake)")
+                models = Array(Set(carData.filter { $0[0] == carYear && $0[1] == carMake }.map { $0[2] })).sorted()
+                print("Available Models: \(models)")
                 modelPickerView.reloadAllComponents()
+            } else {
+                print("Error: Selected row \(row) is out of bounds for makes array with count \(makes.count)")
             }
-        }
-    }
-}
-
-extension GameScene: CLLocationManagerDelegate {
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        switch status {
-        case .notDetermined:
-            print("Location permission not determined.")
-        case .restricted, .denied:
-            print("Location permission restricted or denied.")
-        case .authorizedWhenInUse, .authorizedAlways:
-            print("Location permission granted.")
-            locationManager.startUpdatingLocation()
-        @unknown default:
-            print("Unknown authorization status.")
+        case modelPickerView:
+            if row < models.count {
+                carModel = models[row]
+                print("Selected Model: \(carModel)")
+            } else {
+                print("Error: Selected row \(row) is out of bounds for models array with count \(models.count)")
+            }
+        default:
+            break
         }
     }
 }

@@ -94,6 +94,28 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         locationManager.startUpdatingLocation()
     }
 
+    func updateLocation(_ location: CLLocation) {
+        guard isDriving else { return }
+
+        if let lastLocation = lastLocation {
+            let distance = location.distance(from: lastLocation)
+            totalDistance += distance
+            if let startDrivingDate = startDrivingDate {
+                let duration = Date().timeIntervalSince(startDrivingDate)
+                totalDuration += duration
+            }
+        }
+
+        lastLocation = location
+        delegate?.locationManager?(locationManager, didUpdateLocations: [location])
+
+        // Check if the user is likely in a car (speed > 25 mph)
+        if location.speed > 11.176 { // 25 mph in meters per second
+            // Example threshold for car speed, adjust as needed
+            print("User is likely in a car.")
+        }
+    }
+
     func calculateEmissions(distance: Double, duration: TimeInterval, carYear: String, carMake: String, carModel: String, carData: [[String]]) -> Double {
         // Find car emissions data
         var emissionsPerMile = 0.0
@@ -110,6 +132,4 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         
         return totalEmissions
     }
-
-    // Other methods and properties...
 }

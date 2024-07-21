@@ -12,6 +12,16 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     var startScreen = true
     var getStarted = SKLabelNode()
     var carLabel = SKLabelNode()
+    var background = SKSpriteNode(imageNamed: "background")
+    var homeButton: UIButton!
+    
+    var ecotrack = SKLabelNode()
+    var viewLeaderboardButton = UIButton(type: .system)
+    
+    var myProgressButton = UIButton(type: .system)
+    var myBadgesButton = UIButton(type: .system)
+    var hostingController: UIHostingController<LeaderboardView>?
+    
     
     // UIPickerView declarations
     var yearPickerView: UIPickerView!
@@ -71,16 +81,54 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         
         // Setup welcome and get started labels
         welcome.text = "Welcome to your personal carbon accountant"
-        welcome.fontSize = 20
-        welcome.position = CGPoint(x: 0, y: 280)
-        welcome.fontColor = SKColor.black
+        welcome.zPosition = 2
+        welcome.fontSize = 16
+        welcome.position = CGPoint(x: 0, y: 250)
+        welcome.fontColor = SKColor.white
+        welcome.fontName = "AvenirNext-Bold"
         addChild(welcome)
         
         getStarted.text = "Get Started"
         getStarted.fontSize = 20
         getStarted.position = CGPoint(x: 0, y: 200)
-        getStarted.fontColor = SKColor.black
+        getStarted.fontColor = SKColor.white
+        getStarted.zPosition = 2
+        getStarted.fontName = "AvenirNext-Bold"
         addChild(getStarted)
+        
+        ecotrack.text = "EcoTrack"
+        ecotrack.fontSize = 30
+        ecotrack.position = CGPoint(x:0, y:-350)
+        ecotrack.fontColor = SKColor.white
+        ecotrack.zPosition = 2
+        ecotrack.fontName = "AvenirNext-Bold"
+        addChild(ecotrack)
+        
+        background.zPosition = 1
+        background.position = CGPoint(x: 0, y: 0)
+        addChild(background)
+        
+        homeButton = UIButton(type: .custom)
+        let homeImage = UIImage(named: "EcoTracker")
+        homeButton.setImage(homeImage, for: .normal)
+        homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
+        homeButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        if let view = self.view {
+            view.addSubview(homeButton)
+            
+            NSLayoutConstraint.activate([
+                homeButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                homeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+                homeButton.widthAnchor.constraint(equalToConstant: 50),
+                homeButton.heightAnchor.constraint(equalTo: homeButton.widthAnchor, multiplier: homeImage!.size.height / homeImage!.size.width)
+            ])
+        }
+
+            
+            // Add tap gesture recognizer to the image view
+
+        
         
         carLabel = self.childNode(withName: "carquestion") as! SKLabelNode
         carLabel.isHidden = true
@@ -114,6 +162,7 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         leaderboardLabel.fontColor = SKColor.black
         leaderboardLabel.position = CGPoint(x: 0, y: 100)
         leaderboardLabel.isHidden = true
+        leaderboardLabel.zPosition = 2
         addChild(leaderboardLabel)
     }
     
@@ -142,6 +191,9 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
                 welcome.isHidden = true
                 getStarted.isHidden = true
                 carLabel.isHidden = false
+                carLabel.fontName = "AvenirNext-Bold"
+                carLabel.zPosition = 2
+                carLabel.fontColor = SKColor.white
             }
         }
     }
@@ -239,6 +291,8 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         // Create and configure UIButton
         confirmButton = UIButton(type: .system)
         confirmButton.setTitle("Confirm", for: .normal)
+        confirmButton.setTitleColor(.white, for: .normal)
+        confirmButton.titleLabel?.font = UIFont(name: "AvenirNext-Bold", size: 20)
         confirmButton.translatesAutoresizingMaskIntoConstraints = false  // Use Auto Layout
         confirmButton.addTarget(self, action: #selector(confirmButtonTapped), for: .touchUpInside)
         view?.addSubview(confirmButton)
@@ -265,46 +319,130 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     }
     
     @objc func confirmButtonTapped() {
+        print("Confirmed car: \(carYear) \(carMake) \(carModel)")
+        
         // Save the selected car information
         UserDefaults.standard.set(carYear, forKey: "carYear")
         UserDefaults.standard.set(carMake, forKey: "carMake")
         UserDefaults.standard.set(carModel, forKey: "carModel")
         
-        // Hide the car input fields and button
+        // Hide the pickers and confirm button
         yearPickerView.isHidden = true
         makePickerView.isHidden = true
         modelPickerView.isHidden = true
         confirmButton.isHidden = true
         
-        // Generate random emissions for 3 other users
+        // Show the new buttons
+        showNewButtons()
+    }
+    
+    @objc func homeButtonTapped() {
+        hostingController?.view.removeFromSuperview()
+        hostingController = nil
+        showNewButtons()
+
+        
+    }
+    
+    func showNewButtons() {
+        // Create and configure the 'View Leaderboard' button
+        
+        viewLeaderboardButton.setTitle("View Leaderboard", for: .normal)
+        viewLeaderboardButton.titleLabel?.font = UIFont(name: "AvenirNext-Bold", size: 20)  // Set font
+        viewLeaderboardButton.setTitleColor(.white, for: .normal)
+        viewLeaderboardButton.addTarget(self, action: #selector(viewLeaderboardButtonTapped), for: .touchUpInside)
+        viewLeaderboardButton.isHidden = false
+        
+        // Create and configure the 'My Progress' button
+        
+        myProgressButton.setTitle("My Progress", for: .normal)
+        myProgressButton.titleLabel?.font = UIFont(name: "AvenirNext-Bold", size: 20)  // Set font
+        myProgressButton.setTitleColor(.white, for: .normal)
+        myProgressButton.addTarget(self, action: #selector(myProgressButtonTapped), for: .touchUpInside)
+        myProgressButton.isHidden = false
+        
+        // Create and configure the 'My Badges' button
+        
+        myBadgesButton.setTitle("My Badges", for: .normal)
+        myBadgesButton.addTarget(self, action: #selector(myBadgesButtonTapped), for: .touchUpInside)
+        myBadgesButton.titleLabel?.font = UIFont(name: "AvenirNext-Bold", size: 20)
+        myBadgesButton.setTitleColor(.white, for: .normal)
+        myBadgesButton.isHidden = false
+        
+        // Add buttons to the view
+        if let view = self.view {
+            // Create a vertical stack view to hold the buttons
+            let vStackView = UIStackView(arrangedSubviews: [viewLeaderboardButton, myProgressButton, myBadgesButton])
+            vStackView.axis = .vertical
+            vStackView.alignment = .center
+            vStackView.distribution = .equalSpacing
+            vStackView.spacing = 20
+            
+            vStackView.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(vStackView)
+            
+            NSLayoutConstraint.activate([
+                vStackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                vStackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                viewLeaderboardButton.widthAnchor.constraint(equalToConstant: 200),
+                myProgressButton.widthAnchor.constraint(equalToConstant: 200),
+                myBadgesButton.widthAnchor.constraint(equalToConstant: 200)
+            ])
+        }
+    }
+
+    @objc func viewLeaderboardButtonTapped() {
         let userEmissions = 0  // User's emissions are initially set to 0
         let randomEmissions1 = Int.random(in: 0...500)
         let randomEmissions2 = Int.random(in: 0...500)
         let randomEmissions3 = Int.random(in: 0...500)
-        
+        viewLeaderboardButton.isHidden = true
+        myProgressButton.isHidden = true
+        myBadgesButton.isHidden = true
         // Store other users' emissions for display
         let otherUserEmissions = [randomEmissions1, randomEmissions2, randomEmissions3]
-        
-        // Display the leaderboard
         displayLeaderboard(userEmissions: userEmissions, otherUserEmissions: otherUserEmissions)
+        homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
+
     }
 
+    @objc func myProgressButtonTapped() {
+        viewLeaderboardButton.isHidden = true
+        myProgressButton.isHidden = true
+        myBadgesButton.isHidden = true
+        print("My Progress button tapped")
+        homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
+
+    }
+
+    @objc func myBadgesButtonTapped() {
+        viewLeaderboardButton.isHidden = true
+        myProgressButton.isHidden = true
+        myBadgesButton.isHidden = true
+        print("My Badges button tapped")
+        homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
+
+    }
+    
     func displayLeaderboard(userEmissions: Int, otherUserEmissions: [Int]) {
         let leaderboardView = LeaderboardView(userEmissions: userEmissions, otherUserEmissions: otherUserEmissions)
-        
-        let hostingController = UIHostingController(rootView: leaderboardView)
-        hostingController.view.frame = CGRect(x: 50, y: 100, width: 300, height: 200) // Adjust frame as needed
+        hostingController = UIHostingController(rootView: leaderboardView)
         
         if let view = self.view {
-            view.addSubview(hostingController.view)
-        }
-        
-        // Optionally animate the presentation
-        hostingController.view.alpha = 0
-        UIView.animate(withDuration: 0.3) {
-            hostingController.view.alpha = 1
+            hostingController?.view.frame = CGRect(x: 50, y: 300, width: 300, height: 200) // Adjust frame as needed
+            hostingController?.view.backgroundColor = UIColor.clear
+            
+            view.addSubview(hostingController!.view)
+            
+            // Optionally animate the presentation
+            hostingController?.view.alpha = 0
+            UIView.animate(withDuration: 0.3) {
+                self.hostingController?.view.alpha = 1
+            }
         }
     }
+    
+
     
     // Implement UITextFieldDelegate methods
     func textFieldDidBeginEditing(_ textField: UITextField) {

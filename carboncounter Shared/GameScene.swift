@@ -1,5 +1,4 @@
 import SpriteKit
-import DGCharts
 import SwiftUI
 import UIKit
 import CoreLocation
@@ -18,8 +17,6 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     var homeButton: UIButton!
     var weekEmission = [0, 0, 0, 0, 0, 0, 0]
     private let locationTracker = LocationManager()
-    var chartView: BarChartView?
-
     
     var ecotrack = SKLabelNode()
     var viewLeaderboardButton = UIButton(type: .system)
@@ -85,6 +82,7 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     
     override func didMove(to view: SKView) {
         super.didMove(to: view)
+        
         // Setup welcome and get started labels
         welcome.text = "Welcome to your personal carbon accountant"
         welcome.zPosition = 2
@@ -497,9 +495,9 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     @objc func homeButtonTapped() {
         hostingController?.view.removeFromSuperview()
         hostingController = nil
-        chartView?.removeFromSuperview()
-        chartView = nil
         showNewButtons()
+
+        
     }
     
     func showNewButtons() {
@@ -572,8 +570,6 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         print("My Progress button tapped")
         homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
 
-        // Create and display the histogram
-        createHistogram()
     }
 
     @objc func myBadgesButtonTapped() {
@@ -584,44 +580,6 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         print("My Badges button tapped")
         homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
 
-    }
-    
-    func createHistogram() {
-        // Remove existing chart if any
-        chartView?.removeFromSuperview()
-        
-        // Create a new chart view
-        chartView = BarChartView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        
-        guard let chartView = chartView else { return }
-        
-        // Configure the chart
-        var dataEntries: [BarChartDataEntry] = []
-        for (index, value) in weekEmission.enumerated() {
-            let dataEntry = BarChartDataEntry(x: Double(index), y: Double(value))
-            dataEntries.append(dataEntry)
-        }
-        
-        let chartDataSet = BarChartDataSet(entries: dataEntries, label: "Daily Emissions")
-        chartDataSet.colors = [.blue]
-        
-        let chartData = BarChartData(dataSet: chartDataSet)
-        chartView.data = chartData
-        
-        // Customize the chart appearance
-        chartView.xAxis.valueFormatter = IndexAxisValueFormatter(values: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
-        chartView.xAxis.granularity = 1
-        //chartView.xAxis.labelPosition = .bottom
-        chartView.rightAxis.enabled = false
-        chartView.leftAxis.axisMinimum = 0
-        chartView.legend.enabled = true
-        chartView.chartDescription.enabled = false
-        
-        // Add the chart to the view
-        if let view = self.view {
-            chartView.center = view.center
-            view.addSubview(chartView)
-        }
     }
     
     func displayLeaderboard() {

@@ -1,8 +1,10 @@
 import SpriteKit
+import DGCharts
 import SwiftUI
 import UIKit
 import CoreLocation
 import UserNotifications
+import Foundation
 
 class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     
@@ -14,6 +16,10 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     var carLabel = SKLabelNode()
     var background = SKSpriteNode(imageNamed: "background")
     var homeButton: UIButton!
+    var weekEmission = [0, 0, 0, 0, 0, 0, 0]
+    private let locationTracker = LocationManager()
+    var chartView: BarChartView?
+
     
     var ecotrack = SKLabelNode()
     var viewLeaderboardButton = UIButton(type: .system)
@@ -35,6 +41,7 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     var carYear: String = ""
     var carMake: String = ""
     var carModel: String = ""
+    var emission: String = ""
     
     // UIButton declaration
     var confirmButton: UIButton!
@@ -47,11 +54,11 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     var years = [String]()
     var makes = [String]()
     var models = [String]()
-    var carData: [[String]] = []
+    var carData = [[String]]()
     
     // Leaderboard variables
     var leaderboardLabel: SKLabelNode!
-    var userEmissions: Int = 0
+    var CalculateduserEmissions: Int = 0
     var otherUserEmissions = [Int]()
     
     func loadCSVFile() {
@@ -78,7 +85,6 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     
     override func didMove(to view: SKView) {
         super.didMove(to: view)
-        
         // Setup welcome and get started labels
         welcome.text = "Welcome to your personal carbon accountant"
         welcome.zPosition = 2
@@ -113,6 +119,15 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         homeButton.setImage(homeImage, for: .normal)
         homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
         homeButton.translatesAutoresizingMaskIntoConstraints = false
+        let username = UserDefaults.standard.string(forKey: "username") ?? "User\(Int.random(in: 1000...9999))"
+            createUser(username: username) { success in
+                if success {
+                    print("User created or already exists")
+                    UserDefaults.standard.set(username, forKey: "username")
+                } else {
+                    print("Failed to create user")
+                }
+            }
         
         if let view = self.view {
             view.addSubview(homeButton)
@@ -164,7 +179,16 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         leaderboardLabel.isHidden = true
         leaderboardLabel.zPosition = 2
         addChild(leaderboardLabel)
+        
+        locationTracker.delegate = self
+        locationTracker.loadGPXFile()  // Load GPX data
+        locationTracker.startTrackingDriving()
+
+        // Load GPX file
+        customLocationManager.loadGPXFile()
+
     }
+    
     
     func showGetStartedScreen() {
         // Show the welcome and get started labels
@@ -173,12 +197,27 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     }
     
     func endDrivingSession() {
+        customLocationManager.isDriving = true
         if customLocationManager.isDriving {
             let emissions = customLocationManager.calculateEmissions(distance: customLocationManager.totalDistance, duration: customLocationManager.totalDuration, carYear: carYear, carMake: carMake, carModel: carModel, carData: carData)
+            CalculateduserEmissions = Int(emissions)  // Store the calculated emissions
             print("Total emissions: \(emissions) grams")
             
-            // Update UI or store emissions as needed
-            userEmissions = Int(emissions)
+            let username = UserDefaults.standard.string(forKey: "username") ?? "DefaultUser"
+            updateEmissions(username: username, emissions: Float(CalculateduserEmissions)) { success in
+                DispatchQueue.main.async {
+                    if success {
+                        print("Emissions updated on server successfully")
+                        self.displayLeaderboard()
+                    } else {
+                        print("Failed to update emissions on server")
+                    }
+                }
+            }
+            
+            customLocationManager.isDriving = false
+            customLocationManager.totalDistance = 0
+            customLocationManager.totalDuration = 0
         }
     }
     
@@ -197,6 +236,103 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
             }
         }
     }
+    
+    func startSimulatedTrip() {
+        customLocationManager.startTrackingDriving()
+    }
+
+    // Add this method to handle location updates
+
+    
+    func fetchWeeklyEmissions(completion: @escaping ([(String, Double)]?) -> Void) {
+        guard let url = URL(string: "http://127.0.0.1:5000/api/weekly_emissions") else {
+            print("Invalid URL")
+            completion(nil)
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Error fetching weekly emissions: \(error)")
+                completion(nil)
+                return
+            }
+            
+            guard let data = data else {
+                print("No data returned")
+                completion(nil)
+                return
+            }
+            
+            do {
+                if let jsonResult = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] {
+                    let userEmissionsList = jsonResult.compactMap { dict -> (String, Double)? in
+                        guard let username = dict["username"] as? String,
+                              let emissions = dict["weekly_emissions"] as? Double else {
+                            return nil
+                        }
+                        return (username, emissions)
+                    }
+                    completion(userEmissionsList)
+                } else {
+                    print("Could not parse JSON")
+                    completion(nil)
+                }
+            } catch {
+                print("Error decoding data: \(error)")
+                completion(nil)
+            }
+        }
+        
+        task.resume()
+    }
+    
+    struct UserEmissions: Codable {
+        let username: String
+        let weekly_emissions: Int
+    }
+    
+    struct LeaderboardView: View {
+        let userEmissions: Int
+        let otherUserEmissions: [(String, Double)]
+        
+        var body: some View {
+            VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Your Emissions: \(userEmissions) g")
+                        .foregroundColor(.black)
+                }
+                .padding()
+                .background(Color.blue.opacity(0.6))
+                .cornerRadius(10)
+                
+                Divider()
+                    .background(Color.black)
+                
+                ScrollView {
+                    ForEach(otherUserEmissions, id: \.0) { username, emissions in
+                        HStack {
+                            Text(username)
+                                .foregroundColor(.black)
+                            Spacer()
+                            Text("\(emissions, specifier: "%.2f") g")
+                                .foregroundColor(.black)
+                        }
+                        .padding()
+                        .background(Color.green.opacity(0.6))
+                        .cornerRadius(10)
+                    }
+                }
+            }
+            .padding()
+            //.background(Color.black.opacity(0.8))
+            .cornerRadius(20)
+        }
+    }
+
     
     func requestNotificationPermission() {
         let center = UNUserNotificationCenter.current()
@@ -265,6 +401,11 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         showCarInputFields()  // Show input fields after requesting location permission
     }
     
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // This method will be called with real-time location updates
+        guard let location = locations.last else { return }
+    }
+    
     func showCarInputFields() {
         // Create and configure UIPickerViews
         yearPickerView = createPickerView()
@@ -325,28 +466,45 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         UserDefaults.standard.set(carYear, forKey: "carYear")
         UserDefaults.standard.set(carMake, forKey: "carMake")
         UserDefaults.standard.set(carModel, forKey: "carModel")
+
+        locationTracker.setCarDetails(year: carYear, make: carMake, model: carModel, list: carData)
+        locationTracker.startGPXSimulation()
+        startSimulatedTrip()
         
-        // Hide the pickers and confirm button
-        yearPickerView.isHidden = true
-        makePickerView.isHidden = true
-        modelPickerView.isHidden = true
-        confirmButton.isHidden = true
         
-        // Show the new buttons
-        showNewButtons()
+        // Update car info on the server
+        let username = UserDefaults.standard.string(forKey: "username") ?? "DefaultUser"
+        updateCarInfo(username: username) { success in
+            DispatchQueue.main.async {
+                if success {
+                    print("Car info updated on server successfully")
+                } else {
+                    print("Failed to update car info on server")
+                }
+                
+                // Hide the pickers and confirm button
+                self.yearPickerView.isHidden = true
+                self.makePickerView.isHidden = true
+                self.modelPickerView.isHidden = true
+                self.confirmButton.isHidden = true
+                
+                // Show the new buttons
+                self.showNewButtons()
+            }
+        }
     }
     
     @objc func homeButtonTapped() {
         hostingController?.view.removeFromSuperview()
         hostingController = nil
+        chartView?.removeFromSuperview()
+        chartView = nil
         showNewButtons()
-
-        
     }
     
     func showNewButtons() {
         // Create and configure the 'View Leaderboard' button
-        
+        carLabel.text = "Main Menu"
         viewLeaderboardButton.setTitle("View Leaderboard", for: .normal)
         viewLeaderboardButton.titleLabel?.font = UIFont(name: "AvenirNext-Bold", size: 20)  // Set font
         viewLeaderboardButton.setTitleColor(.white, for: .normal)
@@ -392,7 +550,7 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
     }
 
     @objc func viewLeaderboardButtonTapped() {
-        let userEmissions = 0  // User's emissions are initially set to 0
+        //let userEmissions = 0  // User's emissions are initially set to 0
         let randomEmissions1 = Int.random(in: 0...500)
         let randomEmissions2 = Int.random(in: 0...500)
         let randomEmissions3 = Int.random(in: 0...500)
@@ -401,21 +559,25 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
         myBadgesButton.isHidden = true
         // Store other users' emissions for display
         let otherUserEmissions = [randomEmissions1, randomEmissions2, randomEmissions3]
-        displayLeaderboard(userEmissions: userEmissions, otherUserEmissions: otherUserEmissions)
+        displayLeaderboard()
         homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
 
     }
 
     @objc func myProgressButtonTapped() {
+        carLabel.text = "My Progress"
         viewLeaderboardButton.isHidden = true
         myProgressButton.isHidden = true
         myBadgesButton.isHidden = true
         print("My Progress button tapped")
         homeButton.addTarget(self, action: #selector(homeButtonTapped), for: .touchUpInside)
 
+        // Create and display the histogram
+        createHistogram()
     }
 
     @objc func myBadgesButtonTapped() {
+        carLabel.text = "My badges"
         viewLeaderboardButton.isHidden = true
         myProgressButton.isHidden = true
         myBadgesButton.isHidden = true
@@ -424,23 +586,104 @@ class GameScene: SKScene, UITextFieldDelegate, CLLocationManagerDelegate {
 
     }
     
-    func displayLeaderboard(userEmissions: Int, otherUserEmissions: [Int]) {
-        let leaderboardView = LeaderboardView(userEmissions: userEmissions, otherUserEmissions: otherUserEmissions)
-        hostingController = UIHostingController(rootView: leaderboardView)
+    func createHistogram() {
+        // Remove existing chart if any
+        chartView?.removeFromSuperview()
         
+        // Create a new chart view
+        chartView = BarChartView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
+        
+        guard let chartView = chartView else { return }
+        
+        // Configure the chart
+        var dataEntries: [BarChartDataEntry] = []
+        for (index, value) in weekEmission.enumerated() {
+            let dataEntry = BarChartDataEntry(x: Double(index), y: Double(value))
+            dataEntries.append(dataEntry)
+        }
+        
+        let chartDataSet = BarChartDataSet(entries: dataEntries, label: "Daily Emissions")
+        chartDataSet.colors = [.blue]
+        
+        let chartData = BarChartData(dataSet: chartDataSet)
+        chartView.data = chartData
+        
+        // Customize the chart appearance
+        chartView.xAxis.valueFormatter = IndexAxisValueFormatter(values: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+        chartView.xAxis.granularity = 1
+        //chartView.xAxis.labelPosition = .bottom
+        chartView.rightAxis.enabled = false
+        chartView.leftAxis.axisMinimum = 0
+        chartView.legend.enabled = true
+        chartView.chartDescription.enabled = false
+        
+        // Add the chart to the view
         if let view = self.view {
-            hostingController?.view.frame = CGRect(x: 50, y: 300, width: 300, height: 200) // Adjust frame as needed
-            hostingController?.view.backgroundColor = UIColor.clear
-            
-            view.addSubview(hostingController!.view)
-            
-            // Optionally animate the presentation
-            hostingController?.view.alpha = 0
-            UIView.animate(withDuration: 0.3) {
-                self.hostingController?.view.alpha = 1
+            chartView.center = view.center
+            view.addSubview(chartView)
+        }
+    }
+    
+    func displayLeaderboard() {
+        fetchWeeklyEmissions { userEmissionsList in
+            DispatchQueue.main.async {
+                guard let userEmissionsList = userEmissionsList else {
+                    print("Failed to load user emissions")
+                    return
+                }
+                self.carLabel.text = "Leaderboard"
+                // Find the current user's emissions
+                let currentUsername = UserDefaults.standard.string(forKey: "username") ?? "DefaultUser"
+                let currentUserData = userEmissionsList.first(where: { $0.0 == currentUsername })
+                //let userEmissions = currentUserData?.1 ?? 0
+                self.weekEmission[0] = self.CalculateduserEmissions
+                // Get other users' emissions
+                let otherUserEmissions = userEmissionsList.filter { $0.0 != currentUsername }
+                    .map { (username: $0.0, emissions: $0.1) }
+                self.endDrivingSession()
+                // Create the leaderboard view with fetched data
+                let leaderboardView = LeaderboardView(
+                    userEmissions: self.CalculateduserEmissions,
+                    otherUserEmissions: otherUserEmissions
+                )
+                self.hostingController = UIHostingController(rootView: leaderboardView)
+                self.hostingController?.view.backgroundColor = .white // Change background to white
+                
+                
+                if let view = self.view {
+                    // Remove any existing leaderboard view
+                    self.hostingController?.view.removeFromSuperview()
+                    
+                    // Set the frame to cover a smaller portion of the screen
+                    let width: CGFloat = view.bounds.width * 0.8 // 80% of screen width
+                    let height: CGFloat = view.bounds.height * 0.5 // 60% of screen height
+                    let x = (view.bounds.width - width) / 2
+                    let y = (view.bounds.height - height) / 2
+                    
+                    self.hostingController?.view.frame = CGRect(
+                        x: x,
+                        y: y,
+                        width: width,
+                        height: height
+                    )
+                    
+                    // Add corner radius for a nicer look
+                    self.hostingController?.view.layer.cornerRadius = 10
+                    self.hostingController?.view.clipsToBounds = true
+                    
+                    view.addSubview(self.hostingController!.view)
+                    
+                    // Optionally animate the presentation
+                    self.hostingController?.view.alpha = 0
+                    UIView.animate(withDuration: 0.3) {
+                        self.hostingController?.view.alpha = 1
+                    }
+                }
             }
         }
     }
+
+
     
 
     
@@ -519,5 +762,116 @@ extension GameScene: UIPickerViewDataSource, UIPickerViewDelegate {
         default:
             break
         }
+    }
+}
+extension GameScene {
+    
+    func createUser(username: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "http://127.0.0.1:5000/api/user") else {
+            print("Invalid URL")
+            completion(false)
+            return
+        }
+        
+        let parameters = ["username": username]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: parameters)
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Error: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                print("Invalid response")
+                completion(false)
+                return
+            }
+            
+            completion(true)
+        }
+        
+        task.resume()
+    }
+    
+    func updateCarInfo(username: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "http://127.0.0.1:5000/api/user/\(username)/car") else {
+            print("Invalid URL")
+            completion(false)
+            return
+        }
+        
+        let parameters: [String: Any] = [
+            "username": username,
+            "car_year": carYear,
+            "car_make": carMake,
+            "car_model": carModel
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: parameters)
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Error: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                print("Invalid response")
+                completion(false)
+                return
+            }
+            
+            completion(true)
+        }
+        
+        task.resume()
+    }
+    
+    func updateEmissions(username: String, emissions: Float, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "http://127.0.0.1:5000/api/user/\(username)/emissions") else {
+            print("Invalid URL")
+            completion(false)
+            return
+        }
+        
+        let parameters: [String: Any] = [
+            "username": username,
+            "emissions": emissions
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: parameters)
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Error: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                print("Invalid response")
+                completion(false)
+                return
+            }
+            
+            completion(true)
+        }
+        
+        task.resume()
     }
 }
